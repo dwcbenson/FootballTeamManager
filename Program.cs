@@ -1,14 +1,21 @@
 using FootballTeamManager.Data;
+using FootballTeamManager.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Add in the football data services to access the external api
+builder.Services.AddHttpClient<IFootballDataService, FootballDataService>();
+builder.Services.AddScoped<IFootballDataService, FootballDataService>();
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(connectionString));
 
+
 // Add services to the container.
 builder.Services.AddControllersWithViews();
+
 
 var app = builder.Build();
 

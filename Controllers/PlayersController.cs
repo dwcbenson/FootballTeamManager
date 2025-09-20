@@ -2,6 +2,8 @@
 using FootballTeamManager.Data;
 using FootballTeamManager.Models;
 using FootballTeamManager.Models.ApiModels;
+using FootballTeamManager.Models.FootballData;
+using FootballTeamManager.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
@@ -15,10 +17,12 @@ namespace FootballTeamManager.Controllers
     public class PlayersController : Controller
     {
         private readonly ApplicationDbContext _context;
+        private readonly IFootballDataService _footballDataService;
 
-        public PlayersController(ApplicationDbContext context)
+        public PlayersController(ApplicationDbContext context, IFootballDataService footballDataService)
         {
             _context = context;
+            _footballDataService = footballDataService;
         }
 
         #region ApiEndpoints
@@ -259,7 +263,6 @@ namespace FootballTeamManager.Controllers
             }
         }
 
-
         // Utility method to check for duplicate jersey numbers. There is a sql constraint but this is for redundancy
         private async Task<bool> IsJerseyNumberTaken(int jerseyNumber)
         {
@@ -267,7 +270,36 @@ namespace FootballTeamManager.Controllers
             .Where(p => p.JerseyNumber == jerseyNumber)
             .AnyAsync();
         }
+        
+        [HttpGet]
+        [Route("api/arsenal/recent-results")]
+        public async Task<ActionResult<IEnumerable<Match>>> GetArsenalRecentResults()
+        {
+            try
+            {
+                var results = await _footballDataService.GetArsenalRecentResultsAsync();
+                return Ok(results);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while retrieving Arsenal's recent results.", details = ex.Message });
+            }
+        }
 
+        [HttpGet]
+        [Route("api/arsenal/upcoming-fixtures")]
+        public async Task<ActionResult<IEnumerable<Match>>> GetArsenalUpcomingFixtures()
+        {
+            try
+            {
+                var fixtures = await _footballDataService.GetArsenalUpcomingFixturesAsync();
+                return Ok(fixtures);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while retrieving Arsenal's upcoming fixtures.", details = ex.Message });
+            }
+        }
         #endregion
 
         public IActionResult Index()
@@ -300,6 +332,9 @@ namespace FootballTeamManager.Controllers
             return View(player);
         }
 
-
+        public IActionResult ArsenalResultsPartial()
+        {
+            return PartialView("_ArsenalResults");
+        }
     }
 }
