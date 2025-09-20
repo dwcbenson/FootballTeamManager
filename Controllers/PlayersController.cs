@@ -150,7 +150,7 @@ namespace FootballTeamManager.Controllers
             }
         }
 
-        // PATCH: /api/players/5
+        // PATCH: /api/players/1
         [HttpPatch]
         [Route("api/players/{id}")]
         public async Task<IActionResult> PatchPlayerApi(int id, [FromBody] PatchPlayerRequest request)
@@ -170,12 +170,16 @@ namespace FootballTeamManager.Controllers
                     return NotFound(new { message = $"Player with ID {id} not found." });
                 }
 
-                // Update only the fields that were provided in the request
-                if (!string.IsNullOrEmpty(request.PlayerName))
+                bool isUpdated = false;
+
+                // Update PlayerName if it's different
+                if (!string.IsNullOrEmpty(request.PlayerName) && request.PlayerName != existingPlayer.PlayerName)
                 {
                     existingPlayer.PlayerName = request.PlayerName;
+                    isUpdated = true;
                 }
 
+                // Update Position if it's different
                 if (!string.IsNullOrEmpty(request.Position))
                 {
                     if (!Enum.TryParse<Position>(request.Position, true, out var positionEnum))
@@ -183,22 +187,42 @@ namespace FootballTeamManager.Controllers
                         return BadRequest(new { message = $"That is not a valid position. Please select one of the following: Goalkeeper, Defender, Midfielder, Forward" });
                     }
 
-                    existingPlayer.Position = positionEnum;
+                    if (existingPlayer.Position != positionEnum)
+                    {
+                        existingPlayer.Position = positionEnum;
+                        isUpdated = true;
+                    }
                 }
 
-                if (request.JerseyNumber.HasValue)
+                // Update JerseyNumber if it's different
+                if (request.JerseyNumber.HasValue && request.JerseyNumber.Value != existingPlayer.JerseyNumber)
                 {
+                    // Check if the jersey number is already taken
+                    if (await IsJerseyNumberTaken(request.JerseyNumber.Value))
+                    {
+                        return Conflict(new { message = "A player with this jersey number already exists." });
+                    }
+
                     existingPlayer.JerseyNumber = request.JerseyNumber.Value;
+                    isUpdated = true;
                 }
 
-                if (request.GoalsScored.HasValue)
+                // Update GoalsScored if it's different
+                if (request.GoalsScored.HasValue && request.GoalsScored.Value != existingPlayer.GoalsScored)
                 {
                     existingPlayer.GoalsScored = request.GoalsScored.Value;
+                    isUpdated = true;
                 }
 
-                await _context.SaveChangesAsync(); // Commit changes
-
-                return Ok(new { message = "Player values updated successfully." });
+                if (isUpdated)
+                {
+                    await _context.SaveChangesAsync();
+                    return Ok(new { message = "Player values updated successfully." });
+                }
+                else
+                {
+                    return NoContent();
+                }
             }
             catch (Exception ex)
             {
@@ -207,7 +231,8 @@ namespace FootballTeamManager.Controllers
             }
         }
 
-        // DELETE: /api/players/5
+
+        // DELETE: /api/players/1
         [HttpDelete]
         [Route("api/players/{id}")]
         public async Task<IActionResult> DeletePlayerApi(int id)
@@ -244,5 +269,37 @@ namespace FootballTeamManager.Controllers
         }
 
         #endregion
+
+        public IActionResult Index()
+        {
+            return View();
+        }
+
+        public IActionResult Create()
+        {
+            return View();
+        }
+
+        public async Task<IActionResult> Edit(int id)
+        {
+            var player = await _context.Players
+                .Where(p => p.PlayerId == id)
+                .Select(p => new PatchPlayerRequest
+                {
+                    PlayerName = p.PlayerName,
+                    Position = p.Position.ToString(),
+                    JerseyNumber = p.JerseyNumber,
+                    GoalsScored = p.GoalsScored
+                })
+                .FirstOrDefaultAsync();
+
+            if (player == null)
+                return NotFound();
+
+            ViewBag.PlayerId = id;
+            return View(player);
+        }
+
+
     }
 }

@@ -1,0 +1,169 @@
+﻿@model FootballTeamManager.Models.ApiModels.PatchPlayerRequest;
+
+@{
+    var positionItems = Enum.GetValues<Position>()
+        .Select(p => new SelectListItem
+        {
+            Value = p.ToString(),
+            Text = p.ToString(),
+            Selected = p.ToString().Equals(Model.Position, StringComparison.OrdinalIgnoreCase)
+        }).ToList();
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h3 mb-0">Edit Player</h1>
+        <a asp-action="Index" class="btn btn-secondary">
+            <i class="bi bi-arrow-left me-1"></i> Back to List
+        </a>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <form asp-action="Edit" method="post">
+                <input type="hidden" name="Id" value="@ViewBag.PlayerId" />
+
+                <div class="mb-3">
+                    <label asp-for="PlayerName" class="form-label"></label>
+                    <input asp-for="PlayerName" class="form-control" />
+                    <span asp-validation-for="PlayerName" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Position" class="control-label"></label>
+                    <select asp-for="Position" class="form-control"
+                            asp-items="positionItems"></select>
+                    <span asp-validation-for="Position" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="JerseyNumber" class="form-label"></label>
+                    <input asp-for="JerseyNumber" class="form-control" />
+                    <span asp-validation-for="JerseyNumber" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="GoalsScored" class="form-label"></label>
+                    <input asp-for="GoalsScored" class="form-control" />
+                    <span asp-validation-for="GoalsScored" class="text-danger"></span>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle me-1"></i> Update
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        $(document).ready(function () {
+            var playerId = @Html.Raw(Json.Serialize(ViewBag.PlayerId));
+
+            $('form').on('submit', function (e) {
+                e.preventDefault();
+
+                var formData = {};
+
+                var playerName = $('[name="PlayerName"]').val().trim();
+                if (playerName) {
+                    formData.PlayerName = playerName;
+                }
+
+                var position = $('[name="Position"]').val();
+                if (position) {
+                    formData.Position = position;
+                }
+
+                var jerseyNumber = $('[name="JerseyNumber"]').val();
+                if (jerseyNumber !== '') {
+                    formData.JerseyNumber = parseInt(jerseyNumber);
+                }
+
+                var goalsScored = $('[name="GoalsScored"]').val();
+                if (goalsScored !== '') {
+                    formData.GoalsScored = parseInt(goalsScored);
+                }
+
+                // Don't send empty patch requests
+                if (Object.keys(formData).length === 0) {
+                    showGeneralError('Please make at least one change before updating.');
+                    return;
+                }
+
+                // Show loading state
+                var $submitBtn = $('button[type="submit"]');
+                var originalBtnText = $submitBtn.html();
+                $submitBtn.prop('disabled', true)
+                          .html('<i class="spinner-border spinner-border-sm me-1"></i> Updating...');
+
+                // Make the API call
+                $.ajax({
+                    url: '/api/players/' + playerId,
+                    type: 'PATCH',
+                    contentType: 'application/json',
+                    data: JSON.stringify(formData),
+                    success: function (response) {
+                        window.location.href = '@Url.Action("Index", "Players")';
+                    },
+                    error: function (xhr, status, error) {
+                        if (xhr.status === 404) {
+                            showGeneralError('Player not found. It may have been deleted by another user.');
+                        } else if (xhr.status === 204) {
+                            showGeneralError('No Fields were updated. Please change a field to submit a change');
+                        } else if (xhr.status === 409) {
+                            // Conflict (jersey number taken)
+                            try {
+                                var conflictResponse = JSON.parse(xhr.responseText);
+                                showFieldError('JerseyNumber', conflictResponse.message || 'Jersey number conflict');
+                            } catch (parseError) {
+                                showGeneralError('Jersey number is already taken by another player.');
+                            }
+                        } else {
+                            showGeneralError('An unexpected error occurred. Please try again.');
+                        }
+                    },
+                    complete: function () {
+                        $submitBtn.prop('disabled', false).html(originalBtnText);
+                    }
+                });
+            });
+
+            function showFieldError(fieldName, message) {
+                var $field = $('[name="' + fieldName + '"]');
+                $field.addClass('is-invalid');
+                $field.siblings('.text-danger').text(message);
+
+                $('[data-valmsg-for="' + fieldName + '"]').text(message);
+            }
+
+            function showGeneralError(message) {
+                $('.alert-danger').remove();
+
+                var errorHtml = `
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        ${message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+                $('form').prepend(errorHtml);
+            }
+
+            $('input, select').on('input change', function() {
+                $(this).removeClass('is-invalid');
+                $(this).siblings('.text-danger').text('');
+            });
+        });
+    </script>
+
+    @{
+        await Html.RenderPartialAsync("_ValidationScriptsPartial");
+    }
+}
