@@ -4,6 +4,9 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddHttpClient<IPlayerService, PlayerService>();
+builder.Services.AddScoped<IPlayerService, PlayerService>();
+
 // Add in the football data services to access the external api
 builder.Services.AddHttpClient<IFootballDataService, FootballDataService>();
 builder.Services.AddScoped<IFootballDataService, FootballDataService>();
@@ -22,7 +25,7 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Home/Error");
+    app.UseExceptionHandler("/Players/Error");
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
@@ -36,6 +39,6 @@ app.UseAuthorization();
 
 app.MapControllerRoute(
     name: "default",
-    pattern: "{controller=Home}/{action=Index}/{id?}");
+    pattern: "{controller=Players}/{action=Index}/{id?}");
 
 app.Run();

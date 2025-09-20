@@ -1,160 +1,107 @@
-﻿using Azure.Core;
-using FootballTeamManager.Data;
-using FootballTeamManager.Models;
+﻿using FootballTeamManager.Models;
 using FootballTeamManager.Models.ApiModels;
 using FootballTeamManager.Models.FootballData;
 using FootballTeamManager.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Rendering;
-using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace FootballTeamManager.Controllers
 {
     public class PlayersController : Controller
     {
-        private readonly ApplicationDbContext _context;
         private readonly IFootballDataService _footballDataService;
+        private readonly IPlayerService _playerService;
 
-        public PlayersController(ApplicationDbContext context, IFootballDataService footballDataService)
+        public PlayersController(IPlayerService playerService, IFootballDataService footballDataService)
         {
-            _context = context;
+            _playerService = playerService;
             _footballDataService = footballDataService;
         }
 
-        #region ApiEndpoints
+        [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+        public IActionResult Error()
+        {
+            return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
+        }
 
-        // GET: /api/players
+        #region API Endpoints
+
         [HttpGet]
         [Route("api/players")]
         public async Task<ActionResult<IEnumerable<PlayerApiModel>>> GetAllPlayers()
         {
             try
             {
-                // Get all the players from the database
-                var players = await _context.Players.Select(p => new PlayerApiModel
-                {
-                    PlayerId = p.PlayerId,
-                    PlayerName = p.PlayerName,
-                    Position = p.Position.ToString(),
-                    JerseyNumber = p.JerseyNumber,
-                    GoalsScored = p.GoalsScored
-                }).ToListAsync();
+                var players = await _playerService.GetAllPlayersAsync();
 
-                // Check if there are players to return
-                if (players.Count > 0)
-                {
-                    return Ok(players); // Return the full list
-                }
-                else
-                {
-                    // Unlikely to happen, but better than returning an empty list
+                if (!players.Any())
                     return NoContent();
-                }
+
+                return Ok(players);
             }
             catch (Exception ex)
             {
-                // Something went wrong server-side
-                return StatusCode(500, new { message = "An error occurred while retrieving players.", details = ex.Message });
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while retrieving players.",
+                    details = ex.Message
+                });
             }
         }
 
-        // GET: /api/players/5
         [HttpGet]
         [Route("api/players/{id}")]
         public async Task<ActionResult<PlayerApiModel>> GetPlayer(int id)
         {
             try
             {
-                // Find the player by ID
-                var player = await _context.Players.FirstOrDefaultAsync(x => x.PlayerId == id);
+                var player = await _playerService.GetPlayerByIdAsync(id);
 
                 if (player == null)
-                {
                     return NotFound(new { message = $"Player with ID {id} not found." });
-                }
 
-                // Map the database player to API model
-                var apiModel = new PlayerApiModel
-                {
-                    PlayerId = player.PlayerId,
-                    PlayerName = player.PlayerName,
-                    Position = player.Position.ToString(),
-                    JerseyNumber = player.JerseyNumber,
-                    GoalsScored = player.GoalsScored
-                };
-
-                return Ok(apiModel);
+                return Ok(player);
             }
             catch (Exception ex)
             {
-                // Something went wrong while retrieving this specific player
-                return StatusCode(500, new { message = "An error occurred while retrieving the player.", details = ex.Message });
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while retrieving the player.",
+                    details = ex.Message
+                });
             }
         }
 
-        // POST: /api/players
         [HttpPost]
         [Route("api/players")]
-        public async Task<ActionResult<Player>> CreatePlayer([FromBody] CreatePlayerRequest request)
+        public async Task<ActionResult<PlayerApiModel>> CreatePlayer([FromBody] CreatePlayerRequest request)
         {
             try
             {
                 if (!ModelState.IsValid)
-                {
-                    // Model validation failed
                     return BadRequest(ModelState);
-                }
 
-                // Check if the jersey number is already taken
-                if (await IsJerseyNumberTaken(request.JerseyNumber))
-                {
-                    return Conflict(new { message = "A player with this jersey number already exists." });
-                }
-
-                // Ensure the position is valid
-                if (!Enum.TryParse<Position>(request.Position, true, out var positionEnum))
-                {
-                    return BadRequest(new { message = $"That is not a valid position. Please select one of the following: Goalkeeper, Defender, Midfielder, Forward" });
-                }
-
-                // Create the new player entity
-                var player = new Player
-                {
-                    PlayerName = request.PlayerName,
-                    Position = positionEnum,
-                    JerseyNumber = request.JerseyNumber,
-                    GoalsScored = request.GoalsScored,
-                    CreatedDate = DateTime.UtcNow,
-                    UpdatedDate = DateTime.UtcNow
-                };
-
-                _context.Players.Add(player); // Add to the DB context
-                await _context.SaveChangesAsync(); // Commit to the database
-
-                // Prepare response model to return
-                var responseModel = new PlayerApiModel
-                {
-                    PlayerId = player.PlayerId,
-                    PlayerName = player.PlayerName,
-                    Position = player.Position.ToString(),
-                    JerseyNumber = player.JerseyNumber,
-                    GoalsScored = player.GoalsScored
-                };
-
-                return CreatedAtAction(nameof(GetPlayer), new { id = player.PlayerId }, responseModel);
+                var player = await _playerService.CreatePlayerAsync(request);
+                return CreatedAtAction(nameof(GetPlayer), new { id = player.PlayerId }, player);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
             }
             catch (Exception ex)
             {
-                // Something went wrong server-side
-                return StatusCode(500, new { message = "An error occurred while creating the player.", details = ex.Message });
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while creating the player.",
+                    details = ex.Message
+                });
             }
         }
 
-        // PATCH: /api/players/1
         [HttpPatch]
         [Route("api/players/{id}")]
         public async Task<IActionResult> PatchPlayerApi(int id, [FromBody] PatchPlayerRequest request)
@@ -162,115 +109,60 @@ namespace FootballTeamManager.Controllers
             try
             {
                 if (!ModelState.IsValid)
-                {
-                    return BadRequest(ModelState); // Validation failed
-                }
+                    return BadRequest(ModelState);
 
-                // Retrieve the existing player from DB
-                var existingPlayer = await _context.Players.FirstOrDefaultAsync(x => x.PlayerId == id);
+                var wasUpdated = await _playerService.UpdatePlayerAsync(id, request);
 
-                if (existingPlayer == null)
-                {
-                    return NotFound(new { message = $"Player with ID {id} not found." });
-                }
-
-                bool isUpdated = false;
-
-                // Update PlayerName if it's different
-                if (!string.IsNullOrEmpty(request.PlayerName) && request.PlayerName != existingPlayer.PlayerName)
-                {
-                    existingPlayer.PlayerName = request.PlayerName;
-                    isUpdated = true;
-                }
-
-                // Update Position if it's different
-                if (!string.IsNullOrEmpty(request.Position))
-                {
-                    if (!Enum.TryParse<Position>(request.Position, true, out var positionEnum))
-                    {
-                        return BadRequest(new { message = $"That is not a valid position. Please select one of the following: Goalkeeper, Defender, Midfielder, Forward" });
-                    }
-
-                    if (existingPlayer.Position != positionEnum)
-                    {
-                        existingPlayer.Position = positionEnum;
-                        isUpdated = true;
-                    }
-                }
-
-                // Update JerseyNumber if it's different
-                if (request.JerseyNumber.HasValue && request.JerseyNumber.Value != existingPlayer.JerseyNumber)
-                {
-                    // Check if the jersey number is already taken
-                    if (await IsJerseyNumberTaken(request.JerseyNumber.Value))
-                    {
-                        return Conflict(new { message = "A player with this jersey number already exists." });
-                    }
-
-                    existingPlayer.JerseyNumber = request.JerseyNumber.Value;
-                    isUpdated = true;
-                }
-
-                // Update GoalsScored if it's different
-                if (request.GoalsScored.HasValue && request.GoalsScored.Value != existingPlayer.GoalsScored)
-                {
-                    existingPlayer.GoalsScored = request.GoalsScored.Value;
-                    isUpdated = true;
-                }
-
-                if (isUpdated)
-                {
-                    await _context.SaveChangesAsync();
-                    return Ok(new { message = "Player values updated successfully." });
-                }
+                if (wasUpdated)
+                    return Ok(new { message = "Player updated successfully." });
                 else
-                {
-                    return NoContent();
-                }
+                    return NoContent(); // No changes were made
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
             }
             catch (Exception ex)
             {
-                // Catch any DB errors
-                return StatusCode(500, new { message = "An error occurred while updating the player.", details = ex.Message });
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while updating the player.",
+                    details = ex.Message
+                });
             }
         }
 
-
-        // DELETE: /api/players/1
         [HttpDelete]
         [Route("api/players/{id}")]
         public async Task<IActionResult> DeletePlayerApi(int id)
         {
             try
             {
-                // Find the player to delete
-                var player = await _context.Players.FirstOrDefaultAsync(x => x.PlayerId == id);
+                var wasDeleted = await _playerService.DeletePlayerAsync(id);
 
-                if (player == null)
-                {
+                if (!wasDeleted)
                     return NotFound(new { message = $"Player with ID {id} not found." });
-                }
-
-                _context.Players.Remove(player); // Remove from DB
-                await _context.SaveChangesAsync(); // Commit deletion
 
                 return Ok(new { message = "Player deleted successfully." });
             }
             catch (Exception ex)
             {
-                // Server-side error
-                return StatusCode(500, new { message = "An error occurred while deleting the player.", details = ex.Message });
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while deleting the player.",
+                    details = ex.Message
+                });
             }
         }
 
-        // Utility method to check for duplicate jersey numbers. There is a sql constraint but this is for redundancy
-        private async Task<bool> IsJerseyNumberTaken(int jerseyNumber)
-        {
-            return await _context.Players
-            .Where(p => p.JerseyNumber == jerseyNumber)
-            .AnyAsync();
-        }
-        
         [HttpGet]
         [Route("api/arsenal/recent-results")]
         public async Task<ActionResult<IEnumerable<Match>>> GetArsenalRecentResults()
@@ -302,6 +194,7 @@ namespace FootballTeamManager.Controllers
         }
         #endregion
 
+        #region MVC Actions
         public IActionResult Index()
         {
             return View();
@@ -314,27 +207,29 @@ namespace FootballTeamManager.Controllers
 
         public async Task<IActionResult> Edit(int id)
         {
-            var player = await _context.Players
-                .Where(p => p.PlayerId == id)
-                .Select(p => new PatchPlayerRequest
+            try
+            {
+                var player = await _playerService.GetPlayerByIdAsync(id);
+
+                if (player == null)
+                    return NotFound();
+
+                var patchRequest = new PatchPlayerRequest
                 {
-                    PlayerName = p.PlayerName,
-                    Position = p.Position.ToString(),
-                    JerseyNumber = p.JerseyNumber,
-                    GoalsScored = p.GoalsScored
-                })
-                .FirstOrDefaultAsync();
+                    PlayerName = player.PlayerName,
+                    Position = player.Position,
+                    JerseyNumber = player.JerseyNumber,
+                    GoalsScored = player.GoalsScored
+                };
 
-            if (player == null)
+                ViewBag.PlayerId = id;
+                return View(patchRequest);
+            }
+            catch (Exception)
+            {
                 return NotFound();
-
-            ViewBag.PlayerId = id;
-            return View(player);
+            }
         }
-
-        public IActionResult ArsenalResultsPartial()
-        {
-            return PartialView("_ArsenalResults");
-        }
+        #endregion
     }
 }
