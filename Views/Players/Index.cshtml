@@ -64,85 +64,111 @@
 
     <script>
         $(document).ready(function () {
-            $('#playersTable').DataTable({
-                ajax: {
-                    url: '@Url.Action("GetAllPlayers", "Players")',
-                    dataSrc: ''
-                },
-                columns: [
-                    { data: 'playerName', title: 'Player Name' },
-                    { data: 'position', title: 'Position' },
-                    { data: 'jerseyNumber', title: 'Jersey Number' },
-                    { data: 'goalsScored', title: 'Goals Scored' },
-                    { data: 'playerId',
-                        title: 'Actions',
-                        orderable: false,
-                        searchable: false,
-                        className: 'text-center',
-                        render: function (data, type, row, meta) {
-                            var editUrl = '/Players/Edit/' + data;
-                            return `
-                                <a href="${editUrl}" class="btn btn-sm btn-outline-secondary me-1" title="Edit">
-                                    <i class="bi bi-pencil-square"></i>
-                                </a>
-                                <button class="btn btn-sm btn-outline-danger delete-btn" data-playerid="${data}" title="Delete">
-                                    <i class="bi bi-trash"></i>
-                                </button>`;
+            let retryAttempts = 0;
+            const maxRetries = 2;
+
+            function initDataTable() {
+                $('#playersTable').DataTable({
+                    ajax: {
+                        url: '@Url.Action("GetAllPlayers", "Players")',
+                        dataSrc: '',
+                        timeout: 30000,
+                        cache: false,
+                        error: function(xhr, error, code) {
+                            console.error('DataTables error:', error);
+                            
+                            // Auto-retry on first failure due to deployment issues
+                            if (retryAttempts < maxRetries) {
+                                retryAttempts++;
+                                console.log('Retrying... attempt', retryAttempts);
+                                
+                                setTimeout(() => {
+                                    $('#playersTable').DataTable().destroy();
+                                    initDataTable();
+                                }, 2000 * retryAttempts);
+                            } else {
+                                alert('Unable to load players data. Please refresh the page.');
+                            }
                         }
+                    },
+                    columns: [
+                        { data: 'playerName', title: 'Player Name' },
+                        { data: 'position', title: 'Position' },
+                        { data: 'jerseyNumber', title: 'Jersey Number' },
+                        { data: 'goalsScored', title: 'Goals Scored' },
+                        { data: 'playerId',
+                            title: 'Actions',
+                            orderable: false,
+                            searchable: false,
+                            className: 'text-center',
+                            render: function (data, type, row, meta) {
+                                var editUrl = '/Players/Edit/' + data;
+                                return `
+                                    <a href="${editUrl}" class="btn btn-sm btn-outline-secondary me-1" title="Edit">
+                                        <i class="bi bi-pencil-square"></i>
+                                    </a>
+                                    <button class="btn btn-sm btn-outline-danger delete-btn" data-playerid="${data}" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>`;
+                            }
+                        }
+                    ],
+                    responsive: true,
+                    paging: true,
+                    pageLength: 10,
+                    lengthMenu: [ [5, 10, 25, 50, 100], [5, 10, 25, 50, 100] ],
+                    order: [[0, 'asc']], // sort by Player Name to begin with
+                    language: {
+                        emptyTable: "No players available",
+                        loadingRecords: "Loading players..."
+                    },
+                    initComplete: function () {
+                        retryAttempts = 0;
+                        var api = this.api();
                     }
-                ],
-                responsive: true,
-                paging: true,
-                pageLength: 10,
-                lengthMenu: [ [5, 10, 25, 50, 100], [5, 10, 25, 50, 100] ],
-                order: [[0, 'asc']], // sort by Player Name to begin with
-                language: {
-                    emptyTable: "No players available",
-                    loadingRecords: "Loading players..."
-                },
-                initComplete: function () {
-                    var api = this.api();
-                },
-                error: function (xhr, status, error) {
-                    console.error('DataTables error:', error);
-                }
+                });
+            }
+
+            // Initialize the table
+            initDataTable();
+
+            let playerIdToDelete = null;
+
+            // Open modal and store playerId
+            $('#playersTable tbody').on('click', '.delete-btn', function () {
+                playerIdToDelete = $(this).data('playerid');
+                var deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+                deleteModal.show();
             });
 
-         let playerIdToDelete = null;
+            // Confirm delete and call API
+            $('#confirmDeleteBtn').on('click', function () {
+                if (!playerIdToDelete) return;
 
-        // Open modal and store playerId
-        $('#playersTable tbody').on('click', '.delete-btn', function () {
-            playerIdToDelete = $(this).data('playerid');
-            var deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
-            deleteModal.show();
-        });
+                $.ajax({
+                    url: '/api/players/' + playerIdToDelete,
+                    type: 'DELETE',
+                    timeout: 15000,
+                    success: function (response) {
+                        // Hide modal
+                        var deleteModalEl = document.getElementById('deleteModal');
+                        var deleteModal = bootstrap.Modal.getInstance(deleteModalEl);
+                        deleteModal.hide();
 
-        // Confirm delete and call API
-        $('#confirmDeleteBtn').on('click', function () {
-            if (!playerIdToDelete) return;
-
-            $.ajax({
-                url: '/api/players/' + playerIdToDelete,
-                type: 'DELETE',
-                success: function (response) {
-                    // Hide modal
-                    var deleteModalEl = document.getElementById('deleteModal');
-                    var deleteModal = bootstrap.Modal.getInstance(deleteModalEl);
-                    deleteModal.hide();
-
-                    // Reload DataTable
-                    $('#playersTable').DataTable().ajax.reload(null, false);
-
-                    // Optional: show success alert
-                    console.log(response.message);
-                },
-                error: function (xhr, status, error) {
-                    console.error('Delete error:', error);
-                    alert(xhr.responseJSON?.message || 'Failed to delete player.');
-                }
+                        // Reload DataTable
+                        $('#playersTable').DataTable().ajax.reload(null, false);
+                    },
+                    error: function (xhr, status, error) {
+                        console.error('Delete error:', error);
+                        let errorMsg = xhr.responseJSON?.message || 'Failed to delete player.';
+                        if (status === 'timeout') {
+                            errorMsg = 'Delete request timed out. Please refresh to check if player was deleted.';
+                        }
+                        alert(errorMsg);
+                    }
+                });
             });
-        });
 
-    });
-</script>
+        });
+    </script>
 }
